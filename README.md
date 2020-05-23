@@ -1,1 +1,3 @@
-# TP-GDD-LOS_SEQUEL_BLINDERS
+# Trabajo Practico Gestion de datos
+
+Grupo: Los sequel blinders
