@@ -1,0 +1,168 @@
+USE [GD1C2020]
+GO
+
+/* -------------------------------------------------------------------------------------------------
+ * Chequeamos si existe el esquema.
+ *   Si no existe, lo creamos.
+ *   Si existe, lo limpiamos.
+ * -------------------------------------------------------------------------------------------------
+ */
+
+DECLARE @Schema VARCHAR(30) = 'LOS_SEQUEL_BLINDERS'
+IF NOT EXISTS (select * from sys.schemas where name = @Schema)
+BEGIN
+	EXEC ('CREATE SCHEMA ' + @Schema)
+	PRINT 'Esquema creado!'
+END
+ELSE
+BEGIN
+	-- BORRO TODO LO QUE HAYA EN EL ESQUEMA
+	DECLARE @Sql VARCHAR(MAX);
+
+	--views
+	SELECT @Sql = COALESCE(@Sql,'') + 'DROP VIEW %SCHEMA%.' + QUOTENAME(TABLE_NAME) + ';' + CHAR(13)
+	FROM INFORMATION_SCHEMA.TABLES
+	WHERE TABLE_SCHEMA = @Schema
+		AND TABLE_TYPE = 'VIEW'
+	ORDER BY TABLE_NAME
+
+	--Procedures
+	SELECT @Sql = COALESCE(@Sql,'') + 'DROP PROCEDURE %SCHEMA%.' + QUOTENAME(ROUTINE_NAME) + ';' + CHAR(13)
+	FROM INFORMATION_SCHEMA.ROUTINES
+	WHERE ROUTINE_SCHEMA = @Schema
+		AND ROUTINE_TYPE = 'PROCEDURE'
+	ORDER BY ROUTINE_NAME
+
+	--Functions
+	SELECT @Sql = COALESCE(@Sql,'') + 'DROP FUNCTION %SCHEMA%.' + QUOTENAME(ROUTINE_NAME) + ';' + CHAR(13)
+	FROM INFORMATION_SCHEMA.ROUTINES
+	WHERE ROUTINE_SCHEMA = @Schema
+		AND ROUTINE_TYPE = 'FUNCTION'
+	ORDER BY ROUTINE_NAME
+
+	SELECT @Sql = COALESCE(REPLACE(@Sql,'%SCHEMA%',@Schema), '')
+	EXEC sp_sqlexec @Sql
+END
+GO
+
+
+/* -------------------------------------------------------------------------------------------------
+ * Creamos los store procedures
+ * -------------------------------------------------------------------------------------------------
+ */
+
+CREATE PROCEDURE LOS_SEQUEL_BLINDERS.sp_borrar_tabla (@tabla VARCHAR(30)) AS
+BEGIN
+	DECLARE @SqlDel VARCHAR(MAX), @esquema VARCHAR(30) = 'LOS_SEQUEL_BLINDERS'
+	IF ( EXISTS(
+		SELECT 
+			TABLE_NAME
+		FROM INFORMATION_SCHEMA.TABLES
+		WHERE TABLE_NAME = @tabla
+		AND	  TABLE_SCHEMA = @esquema)
+	)
+	BEGIN
+		SET @SqlDel = 'DROP TABLE ['+ @esquema +'].' + QUOTENAME(@tabla) + ';'
+		EXEC sp_sqlexec @SqlDel
+	END
+END
+GO
+
+/* -------------------------------------------------------------------------------------------------
+ * Borramos las tablas en el orden correcto para no tener problemas con las FK
+ * -------------------------------------------------------------------------------------------------
+ */
+
+exec LOS_SEQUEL_BLINDERS.sp_borrar_tabla 'ESTADIA';
+exec LOS_SEQUEL_BLINDERS.sp_borrar_tabla 'HABITACION';
+exec LOS_SEQUEL_BLINDERS.sp_borrar_tabla 'TIPO_HABITACION';
+exec LOS_SEQUEL_BLINDERS.sp_borrar_tabla 'HOTEL';
+
+/* -------------------------------------------------------------------------------------------------
+ * Creamos las tablas
+ * -------------------------------------------------------------------------------------------------
+ */
+
+ USE [GD1C2020]
+GO
+
+-- CREO TABLAS
+
+CREATE TABLE LOS_SEQUEL_BLINDERS.TIPO_HABITACION(
+	TIPO_HABITACION_CODIGO decimal(18, 0) PRIMARY KEY,
+	TIPO_HABITACION_DESC NVARCHAR(100) NOT NULL
+)
+
+CREATE TABLE LOS_SEQUEL_BLINDERS.HOTEL(
+	HOTEL_ID int PRIMARY KEY IDENTITY,
+	HOTEL_CALLE NVARCHAR(100) NOT NULL,
+	HOTEL_NRO_CALLE decimal(18,0) NOT NULL,
+	HOTEL_CANTIDAD_ESTRELLAS decimal(18,0) NOT NULL
+)
+
+CREATE TABLE LOS_SEQUEL_BLINDERS.HABITACION(
+	
+	HABITACION_ID int PRIMARY KEY IDENTITY,
+	TIPO_HABITACION_CODIGO decimal(18,0) FOREIGN KEY REFERENCES LOS_SEQUEL_BLINDERS.TIPO_HABITACION(TIPO_HABITACION_CODIGO),
+	HABITACION_NRO decimal(18,0) NOT NULL,
+	HABITACION_PISO decimal(18,0) NOT NULL,
+	HABITACION_FRENTE nvarchar(100) NOT NULL,
+	HABITACION_COSTO decimal(18,0) NOT NULL,
+	HABITACION_PRECIO decimal(18,0) NOT NULL,
+	HOTEL_ID int FOREIGN KEY REFERENCES LOS_SEQUEL_BLINDERS.HOTEL(HOTEL_ID)
+)
+
+CREATE TABLE LOS_SEQUEL_BLINDERS.ESTADIA(
+	
+	ESTADIA_CODIGO decimal(18,0) PRIMARY KEY,
+	ESTADIA_FECHA_INI datetime2(3) NOT NULL,
+	ESTADIA_CANTIDAD_NOCHES decimal(18,0) NOT NULL,
+	HABITACION_ID int FOREIGN KEY REFERENCES LOS_SEQUEL_BLINDERS.HABITACION(HABITACION_ID)
+)
+
+-- CARGO REGISTROS
+
+-- TIPO_HABITACION
+INSERT INTO LOS_SEQUEL_BLINDERS.TIPO_HABITACION 
+SELECT DISTINCT
+	TIPO_HABITACION_CODIGO,
+	TIPO_HABITACION_DESC
+FROM gd_esquema.Maestra
+WHERE TIPO_HABITACION_CODIGO is not null;
+
+-- HOTEL
+INSERT INTO LOS_SEQUEL_BLINDERS.HOTEL
+SELECT DISTINCT
+	--HOTEL_ID,
+	HOTEL_CALLE,
+	HOTEL_NRO_CALLE,
+	HOTEL_CANTIDAD_ESTRELLAS
+FROM gd_esquema.Maestra M 
+WHERE HOTEL_CALLE is not null AND HOTEL_NRO_CALLE is not null;
+
+-- HABITACION
+INSERT INTO LOS_SEQUEL_BLINDERS.HABITACION
+SELECT DISTINCT
+	M.TIPO_HABITACION_CODIGO,
+	M.HABITACION_NUMERO	AS HABITACION_NRO,
+	M.HABITACION_PISO,
+	M.HABITACION_FRENTE,
+	M.HABITACION_COSTO,
+	M.HABITACION_PRECIO,
+	H.HOTEL_ID
+FROM gd_esquema.Maestra M 
+INNER JOIN LOS_SEQUEL_BLINDERS.HOTEL H ON (M.HOTEL_CALLE = H.HOTEL_CALLE AND M.HOTEL_NRO_CALLE = H.HOTEL_NRO_CALLE)
+WHERE M.HABITACION_NUMERO is not null and M.HABITACION_PISO is not null;
+
+
+-- ESTADIA
+INSERT INTO LOS_SEQUEL_BLINDERS.ESTADIA
+SELECT DISTINCT
+	M.ESTADIA_CODIGO,
+	M.ESTADIA_FECHA_INI,
+	M.ESTADIA_CANTIDAD_NOCHES,
+	HB.HABITACION_ID
+FROM gd_esquema.Maestra M
+JOIN LOS_SEQUEL_BLINDERS.HOTEL H ON (M.HOTEL_CALLE = H.HOTEL_CALLE AND M.HOTEL_NRO_CALLE = H.HOTEL_NRO_CALLE)
+INNER JOIN LOS_SEQUEL_BLINDERS.HABITACION HB ON (M.HABITACION_NUMERO = HB.HABITACION_NRO AND M.HABITACION_PISO = HB.HABITACION_PISO AND H.HOTEL_ID = HB.HOTEL_ID)
+WHERE M.ESTADIA_CODIGO is not null;
